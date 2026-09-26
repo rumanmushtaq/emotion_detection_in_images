@@ -34,7 +34,7 @@
         </div>
 
         <div class="row justify-content-center">
-            <div class="col-lg-8">
+            <div class="col-lg-10">
                 {% if error %}
                 <div class="alert-glass d-flex align-items-center gap-2 mb-4">
                     <i class="fas fa-exclamation-circle"></i>
@@ -45,15 +45,20 @@
                 <form action="{{ url_for('upload') }}" method="POST" enctype="multipart/form-data" id="uploadForm">
                     <div class="glass-card p-4 mb-4" style="cursor: default;">
                         <div class="dropzone" id="dropzone" onclick="document.getElementById('image').click()">
-                            <div class="dropzone-icon">
-                                <i class="fas fa-cloud-upload-alt"></i>
+                            <div id="previewContainer" style="display: none;">
+                                <img id="imagePreview" style="max-height: 200px; border-radius: 12px; margin-bottom: 0.5rem;" />
                             </div>
-                            <p class="dropzone-text mb-1">
-                                <strong>Click to upload</strong> or drag and drop
-                            </p>
-                            <p class="dropzone-text" style="font-size: 0.8rem;">
-                                JPG, PNG, BMP, WebP (max 16MB)
-                            </p>
+                            <div id="uploadPrompt">
+                                <div class="dropzone-icon">
+                                    <i class="fas fa-cloud-upload-alt"></i>
+                                </div>
+                                <p class="dropzone-text mb-1">
+                                    <strong>Click to upload</strong> or drag and drop
+                                </p>
+                                <p class="dropzone-text" style="font-size: 0.8rem;">
+                                    JPG, PNG, BMP, WebP (max 16MB)
+                                </p>
+                            </div>
                             <p id="fileName" style="color: #a78bfa; font-weight: 600; margin-top: 0.5rem; display: none;"></p>
                         </div>
                         <input type="file" name="image" id="image" class="file-input-hidden"
@@ -61,76 +66,121 @@
 
                         <div class="text-center mt-3">
                             <button type="submit" class="btn-glow btn-glow-primary" id="submitBtn">
-                                <i class="fas fa-sparkles"></i> Analyze Emotion
+                                <i class="fas fa-bolt"></i> Analyze Emotion
                             </button>
                         </div>
 
                         <div id="loadingSpinner" class="text-center mt-4" style="display: none;">
                             <div class="spinner-custom mx-auto"></div>
                             <p style="color: rgba(255,255,255,0.5); margin-top: 0.8rem; font-size: 0.9rem;">
-                                Analyzing emotions with DeepFace AI...
+                                Analyzing emotions, age, gender &amp; race...
                             </p>
                         </div>
                     </div>
                 </form>
 
-                {% if emotion %}
+                {% if faces is not none and faces|length > 0 %}
                 <div class="result-section">
-                    <div class="row g-4">
-                        <div class="col-md-6">
-                            <div class="glass-card emotion-result-card" style="cursor: default;">
-                                {% if compound %}
-                                <div class="emotion-emoji">{{ emoji if emoji else '🎭' }}</div>
-                                <div class="emotion-label">{{ compound }}</div>
-                                <div class="emotion-base">Base: {{ emotion | capitalize }}</div>
-                                {% else %}
-                                <div class="emotion-emoji">🎭</div>
-                                <div class="emotion-label">{{ emotion | capitalize }}</div>
-                                {% endif %}
-                            </div>
-
-                            {% if emotions %}
-                            <div class="glass-card p-4 mt-4" style="cursor: default;">
-                                <h6 style="color: rgba(255,255,255,0.7); font-weight: 600; margin-bottom: 1rem; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 1px;">
-                                    Emotion Breakdown
-                                </h6>
-                                {% for emo, score in emotions.items() | sort(attribute='1', reverse=true) %}
-                                <div class="emotion-bar-item">
-                                    <div class="emotion-bar-header">
-                                        <span class="emotion-bar-name">
-                                            {% if emo == 'happy' %}😊
-                                            {% elif emo == 'sad' %}😢
-                                            {% elif emo == 'angry' %}😠
-                                            {% elif emo == 'surprise' %}😲
-                                            {% elif emo == 'fear' %}😨
-                                            {% elif emo == 'disgust' %}🤢
-                                            {% elif emo == 'neutral' %}😐
-                                            {% endif %}
-                                            {{ emo }}
-                                        </span>
-                                        <span class="emotion-bar-score">{{ "%.1f" | format(score) }}%</span>
-                                    </div>
-                                    <div class="emotion-bar-track">
-                                        <div class="emotion-bar-fill bar-{{ emo }}" style="width: {{ score }}%;"></div>
-                                    </div>
-                                </div>
-                                {% endfor %}
-                            </div>
-                            {% endif %}
+                    <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+                        <div class="d-flex align-items-center gap-2">
+                            <span class="face-count-badge">
+                                <i class="fas fa-users"></i> {{ face_count }} face{{ 's' if face_count != 1 }} detected
+                            </span>
                         </div>
-
-                        <div class="col-md-6">
-                            <div class="glass-card p-3" style="cursor: default;">
-                                <img src="data:image/jpeg;base64,{{ image }}"
-                                     alt="Processed image with detected emotion"
-                                     class="result-image" />
-                            </div>
+                        <div class="d-flex gap-2">
+                            <form action="{{ url_for('download_image') }}" method="POST" style="display:inline;">
+                                <input type="hidden" name="image_data" value="{{ image }}">
+                                <button type="submit" class="btn-outline-glass" style="font-size: 0.85rem;">
+                                    <i class="fas fa-download"></i> Download
+                                </button>
+                            </form>
+                            <a href="{{ url_for('upload') }}" class="btn-outline-glass" style="font-size: 0.85rem;">
+                                <i class="fas fa-redo"></i> New
+                            </a>
                         </div>
                     </div>
 
-                    <div class="text-center mt-4">
-                        <a href="{{ url_for('upload') }}" class="btn-outline-glass">
-                            <i class="fas fa-redo"></i> Analyze Another
+                    <div class="row g-4">
+                        <div class="col-lg-6">
+                            <div class="glass-card p-3" style="cursor: default;">
+                                <img src="data:image/jpeg;base64,{{ image }}"
+                                     alt="Processed image with detected emotions"
+                                     class="result-image" />
+                            </div>
+                        </div>
+
+                        <div class="col-lg-6">
+                            {% for face in faces %}
+                            <div class="glass-card p-4 mb-3 face-card" style="cursor: default;">
+                                <div class="d-flex justify-content-between align-items-start mb-3">
+                                    <div class="d-flex align-items-center gap-2">
+                                        <span class="face-number-badge">{{ face.number }}</span>
+                                        <div>
+                                            <div class="emotion-label" style="font-size: 1.3rem;">
+                                                {{ face.emoji if face.emoji else '🎭' }} {{ face.compound }}
+                                            </div>
+                                            <div class="emotion-base">Base: {{ face.dominant_emotion | capitalize }}</div>
+                                        </div>
+                                    </div>
+                                    <span class="confidence-badge">{{ face.confidence }}%</span>
+                                </div>
+
+                                <div class="face-meta-row">
+                                    {% if face.age %}
+                                    <span class="face-meta-tag">
+                                        <i class="fas fa-birthday-cake"></i> ~{{ face.age }} yrs
+                                    </span>
+                                    {% endif %}
+                                    {% if face.gender %}
+                                    <span class="face-meta-tag">
+                                        <i class="fas fa-venus-mars"></i> {{ face.gender }}
+                                    </span>
+                                    {% endif %}
+                                    {% if face.race %}
+                                    <span class="face-meta-tag">
+                                        <i class="fas fa-globe"></i> {{ face.race | capitalize }}
+                                    </span>
+                                    {% endif %}
+                                </div>
+
+                                <div class="mt-3">
+                                    {% for emo, score in face.emotions.items() | sort(attribute='1', reverse=true) %}
+                                    <div class="emotion-bar-item">
+                                        <div class="emotion-bar-header">
+                                            <span class="emotion-bar-name">
+                                                {% if emo == 'happy' %}😊
+                                                {% elif emo == 'sad' %}😢
+                                                {% elif emo == 'angry' %}😠
+                                                {% elif emo == 'surprise' %}😲
+                                                {% elif emo == 'fear' %}😨
+                                                {% elif emo == 'disgust' %}🤢
+                                                {% elif emo == 'neutral' %}😐
+                                                {% endif %}
+                                                {{ emo }}
+                                            </span>
+                                            <span class="emotion-bar-score">{{ "%.1f" | format(score) }}%</span>
+                                        </div>
+                                        <div class="emotion-bar-track">
+                                            <div class="emotion-bar-fill bar-{{ emo }}" style="width: {{ score }}%;"></div>
+                                        </div>
+                                    </div>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </div>
+                {% elif faces is not none and faces|length == 0 %}
+                <div class="result-section">
+                    <div class="glass-card p-4 text-center" style="cursor: default;">
+                        <div style="font-size: 3rem; margin-bottom: 0.5rem;">🤷</div>
+                        <div class="emotion-label" style="font-size: 1.2rem;">No faces detected</div>
+                        <p style="color: rgba(255,255,255,0.5); font-size: 0.9rem; margin-top: 0.5rem;">
+                            Try uploading a clearer photo with visible faces.
+                        </p>
+                        <a href="{{ url_for('upload') }}" class="btn-outline-glass mt-2" style="font-size: 0.85rem;">
+                            <i class="fas fa-redo"></i> Try Again
                         </a>
                     </div>
                 </div>
@@ -144,13 +194,25 @@
         const dropzone = document.getElementById('dropzone');
         const fileInput = document.getElementById('image');
         const fileName = document.getElementById('fileName');
+        const preview = document.getElementById('imagePreview');
+        const previewContainer = document.getElementById('previewContainer');
+        const uploadPrompt = document.getElementById('uploadPrompt');
+
+        function showPreview(file) {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                preview.src = e.target.result;
+                previewContainer.style.display = 'block';
+                uploadPrompt.style.display = 'none';
+            };
+            reader.readAsDataURL(file);
+            fileName.textContent = file.name;
+            fileName.style.display = 'block';
+            dropzone.classList.add('drag-over');
+        }
 
         fileInput.addEventListener('change', function() {
-            if (this.files.length > 0) {
-                fileName.textContent = this.files[0].name;
-                fileName.style.display = 'block';
-                dropzone.classList.add('drag-over');
-            }
+            if (this.files.length > 0) showPreview(this.files[0]);
         });
 
         dropzone.addEventListener('dragover', function(e) {
@@ -165,10 +227,7 @@
         dropzone.addEventListener('drop', function(e) {
             e.preventDefault();
             fileInput.files = e.dataTransfer.files;
-            if (fileInput.files.length > 0) {
-                fileName.textContent = fileInput.files[0].name;
-                fileName.style.display = 'block';
-            }
+            if (fileInput.files.length > 0) showPreview(fileInput.files[0]);
         });
 
         document.getElementById('uploadForm').addEventListener('submit', function() {

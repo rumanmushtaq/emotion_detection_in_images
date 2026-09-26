@@ -1,13 +1,15 @@
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
-from flask import Flask, render_template, Response, request, redirect, url_for, jsonify
+from flask import Flask, render_template, Response, request, redirect, url_for, jsonify, send_file
 import cv2
 import numpy as np
 from deepface import DeepFace
 import base64
 import logging
 import atexit
+import io
+import threading
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -39,7 +41,7 @@ def set_security_headers(response):
         "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
         "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://fonts.googleapis.com; "
         "font-src 'self' https://cdnjs.cloudflare.com https://fonts.gstatic.com; "
-        "img-src 'self' data:; "
+        "img-src 'self' data: blob:; "
     )
     response.headers['X-Content-Type-Options'] = 'nosniff'
     response.headers['X-Frame-Options'] = 'DENY'
@@ -85,6 +87,8 @@ INTENSITY_LABELS = {
     'neutral': {(0, 20): 'Neutral', (20, 50): 'Calm', (50, 75): 'Composed', (75, 100): 'Stoic'},
 }
 
+MIN_FACE_CONFIDENCE = 0.5
+
 
 def get_intensity_label(emotion, score):
     ranges = INTENSITY_LABELS.get(emotion, {})
@@ -109,6 +113,8 @@ def detect_compound_emotion(emotions):
 
 
 camera = None
+live_faces_data = []
+live_faces_lock = threading.Lock()
 
 
 def cleanup_camera():
@@ -131,38 +137,72 @@ def allowed_file(filename):
 
 def detect_faces_and_emotions(image):
     try:
-        results = DeepFace.analyze(image, actions=['emotion'], enforce_detection=False, silent=True)
+        results = DeepFace.analyze(
+            image,
+            actions=['emotion', 'age', 'gender', 'race'],
+            enforce_detection=False,
+            silent=True
+        )
     except Exception as e:
         logger.error("DeepFace analysis failed: %s", e)
-        return image, "Analysis failed", {}, '', ''
+        return image, []
 
     if not results:
-        return image, "No face detected", {}, '', ''
+        return image, []
 
-    all_emotions = {}
-    dominant_emotion = None
-    compound_label = ''
-    compound_emoji = ''
+    faces = []
+    face_num = 0
 
     for face in results:
+        confidence = face.get('face_confidence', 1.0)
+        if confidence < MIN_FACE_CONFIDENCE:
+            continue
+
+        face_num += 1
         region = face.get('region', {})
         x, y, w, h = region.get('x', 0), region.get('y', 0), region.get('w', 0), region.get('h', 0)
 
         dominant_emotion = face.get('dominant_emotion', 'unknown')
         emotions = face.get('emotion', {})
-        all_emotions = emotions
+        age = face.get('age', None)
+        gender_data = face.get('gender', {})
+        dominant_gender = face.get('dominant_gender', None)
+        race_data = face.get('race', {})
+        dominant_race = face.get('dominant_race', None)
 
         compound_label, compound_emoji = detect_compound_emotion(emotions)
 
-        color = EMOTION_COLORS.get(dominant_emotion, (0, 255, 0))
+        face_info = {
+            'number': face_num,
+            'dominant_emotion': dominant_emotion,
+            'emotions': emotions,
+            'compound': compound_label,
+            'emoji': compound_emoji,
+            'confidence': round(confidence * 100, 1),
+            'age': age,
+            'gender': dominant_gender,
+            'gender_scores': gender_data,
+            'race': dominant_race,
+            'race_scores': race_data,
+        }
+        faces.append(face_info)
 
+        color = EMOTION_COLORS.get(dominant_emotion, (0, 255, 0))
         cv2.rectangle(image, (x, y), (x + w, y + h), color, 2)
 
-        label = f"{compound_label} ({emotions.get(dominant_emotion, 0):.1f}%)"
-        label_position = (x, y - 10)
-        cv2.putText(image, label, label_position, cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+        num_bg_size = cv2.getTextSize(str(face_num), cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)[0]
+        cv2.rectangle(image, (x, y - 25), (x + num_bg_size[0] + 10, y), color, -1)
+        cv2.putText(image, str(face_num), (x + 5, y - 7), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 
-    return image, dominant_emotion, all_emotions, compound_label, compound_emoji
+        label = f"{compound_label} ({emotions.get(dominant_emotion, 0):.0f}%)"
+        label_x = x + num_bg_size[0] + 15
+        cv2.putText(image, label, (label_x, y - 7), cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2)
+
+        if age is not None and dominant_gender:
+            info_label = f"{dominant_gender}, ~{age}y"
+            cv2.putText(image, info_label, (x, y + h + 18), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+
+    return image, faces
 
 
 @app.route('/')
@@ -175,14 +215,14 @@ def index():
 def upload():
     if request.method == 'POST':
         if 'image' not in request.files:
-            return render_template('upload.html', emotion=None, error='No file selected')
+            return render_template('upload.html', faces=None, error='No file selected')
 
         file = request.files['image']
         if not file or not file.filename:
-            return render_template('upload.html', emotion=None, error='No file selected')
+            return render_template('upload.html', faces=None, error='No file selected')
 
         if not allowed_file(file.filename):
-            return render_template('upload.html', emotion=None,
+            return render_template('upload.html', faces=None,
                                    error='Unsupported file format. Please upload JPG, PNG, BMP, or WebP.')
 
         try:
@@ -190,21 +230,36 @@ def upload():
             image = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
 
             if image is None:
-                return render_template('upload.html', emotion=None, error='Could not read image. Please try another file.')
+                return render_template('upload.html', faces=None, error='Could not read image. Please try another file.')
 
-            processed_image, emotion, emotions, compound, emoji = detect_faces_and_emotions(image)
+            processed_image, faces = detect_faces_and_emotions(image)
 
             _, buffer = cv2.imencode('.jpg', processed_image)
             image_base64 = base64.b64encode(buffer).decode('utf-8')
 
-            return render_template('upload.html', emotion=emotion, emotions=emotions,
-                                   compound=compound, emoji=emoji, image=image_base64)
+            return render_template('upload.html', faces=faces, image=image_base64,
+                                   face_count=len(faces))
 
         except Exception as e:
             logger.exception("Error processing uploaded image")
-            return render_template('upload.html', emotion=None, error='Error processing image. Please try a different file.')
+            return render_template('upload.html', faces=None, error='Error processing image. Please try a different file.')
 
-    return render_template('upload.html', emotion=None)
+    return render_template('upload.html', faces=None)
+
+
+@app.route('/download', methods=['POST'])
+def download_image():
+    image_data = request.form.get('image_data', '')
+    if not image_data:
+        return redirect(url_for('upload'))
+
+    image_bytes = base64.b64decode(image_data)
+    return send_file(
+        io.BytesIO(image_bytes),
+        mimetype='image/jpeg',
+        as_attachment=True,
+        download_name='emotion_analysis.jpg'
+    )
 
 
 @app.route('/real_time')
@@ -229,12 +284,16 @@ def video_feed():
         camera = cv2.VideoCapture(0)
 
     def gen_frames():
+        global live_faces_data
         while camera is not None:
             success, frame = camera.read()
             if not success:
                 break
 
-            frame, _, _, _, _ = detect_faces_and_emotions(frame)
+            frame, faces = detect_faces_and_emotions(frame)
+
+            with live_faces_lock:
+                live_faces_data = faces
 
             _, buffer = cv2.imencode('.jpg', frame)
             frame = buffer.tobytes()
@@ -244,27 +303,80 @@ def video_feed():
     return Response(gen_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
 
+@app.route('/api/live_emotions')
+def live_emotions():
+    with live_faces_lock:
+        data = []
+        for face in live_faces_data:
+            data.append({
+                'number': face['number'],
+                'dominant_emotion': face['dominant_emotion'],
+                'compound': face['compound'],
+                'emoji': face['emoji'],
+                'emotions': face['emotions'],
+                'age': face['age'],
+                'gender': face['gender'],
+                'confidence': face['confidence'],
+            })
+    return jsonify({'faces': data})
+
+
 @app.route('/stop', methods=['POST'])
 def stop_detection():
-    global camera
+    global camera, live_faces_data
     if camera:
         camera.release()
         camera = None
+    with live_faces_lock:
+        live_faces_data = []
 
     return redirect(url_for('real_time'))
+
+
+@app.route('/api/analyze', methods=['POST'])
+@_limit("10 per minute")
+def api_analyze():
+    if 'image' not in request.files:
+        return jsonify({'error': 'No image provided'}), 400
+
+    file = request.files['image']
+    if not file or not file.filename:
+        return jsonify({'error': 'No image provided'}), 400
+
+    if not allowed_file(file.filename):
+        return jsonify({'error': 'Unsupported format. Use JPG, PNG, BMP, or WebP.'}), 400
+
+    try:
+        file_bytes = np.asarray(bytearray(file.read()), dtype=np.uint8)
+        image = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+
+        if image is None:
+            return jsonify({'error': 'Could not decode image'}), 400
+
+        _, faces = detect_faces_and_emotions(image)
+
+        return jsonify({
+            'face_count': len(faces),
+            'faces': faces
+        })
+
+    except Exception as e:
+        logger.exception("API analysis failed")
+        return jsonify({'error': 'Analysis failed'}), 500
 
 
 @app.route('/health')
 def health_check():
     return jsonify({
         'status': 'ok',
-        'emotions_supported': list(EMOTION_COLORS.keys())
+        'emotions_supported': list(EMOTION_COLORS.keys()),
+        'features': ['emotion', 'age', 'gender', 'race', 'compound', 'intensity', 'multi-face']
     })
 
 
 @app.errorhandler(413)
 def file_too_large(e):
-    return render_template('upload.html', emotion=None, error='File too large. Maximum size is 16MB.'), 413
+    return render_template('upload.html', faces=None, error='File too large. Maximum size is 16MB.'), 413
 
 
 @app.errorhandler(500)

@@ -439,6 +439,79 @@ img {
     box-shadow: none;
 }
 
+.face-count-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    border-radius: 12px;
+    background: rgba(124, 58, 237, 0.15);
+    border: 1px solid rgba(124, 58, 237, 0.3);
+    color: #a78bfa;
+    font-weight: 600;
+    font-size: 0.9rem;
+}
+
+.face-number-badge {
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    background: linear-gradient(135deg, #7c3aed, #2563eb);
+    color: white;
+    font-weight: 700;
+    font-size: 0.8rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.confidence-badge {
+    padding: 3px 10px;
+    border-radius: 8px;
+    background: rgba(16, 185, 129, 0.15);
+    border: 1px solid rgba(16, 185, 129, 0.3);
+    color: #34d399;
+    font-weight: 600;
+    font-size: 0.75rem;
+}
+
+.face-meta-row {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 0.5rem;
+}
+
+.face-meta-tag {
+    padding: 4px 10px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 0.78rem;
+    font-weight: 500;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.face-meta-tag i {
+    font-size: 0.7rem;
+    opacity: 0.7;
+}
+
+.face-card {
+    border-left: 3px solid #7c3aed;
+}
+
+.face-card-live {
+    padding: 0.8rem;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
 @media (max-width: 767px) {
     .hero-title {
         font-size: 2.2rem;
