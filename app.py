@@ -1,10 +1,13 @@
+import os
+os.environ['TF_USE_LEGACY_KERAS'] = '1'
+
 from flask import Flask, render_template, Response, request, redirect, url_for, jsonify
 import cv2
 import numpy as np
-from tensorflow.keras.models import load_model
-from tensorflow.keras.preprocessing.image import img_to_array
+import tf_keras as keras
+from tf_keras.models import load_model
+from tf_keras.preprocessing.image import img_to_array
 import base64
-import os
 import logging
 import atexit
 
