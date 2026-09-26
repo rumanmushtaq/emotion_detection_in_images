@@ -20,3 +20,5 @@ Thumbs.db
 .ipynb_checkpoints/
 .idea/
 .vscode/
+Models/model.h5
+.claude/

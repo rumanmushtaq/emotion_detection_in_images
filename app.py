@@ -1,12 +1,10 @@
 import os
-os.environ['TF_USE_LEGACY_KERAS'] = '1'
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
 from flask import Flask, render_template, Response, request, redirect, url_for, jsonify
 import cv2
 import numpy as np
-import tf_keras as keras
-from tf_keras.models import load_model
-from tf_keras.preprocessing.image import img_to_array
+from deepface import DeepFace
 import base64
 import logging
 import atexit
@@ -39,8 +37,8 @@ def set_security_headers(response):
     response.headers['Content-Security-Policy'] = (
         "default-src 'self'; "
         "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
-        "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
-        "font-src 'self' https://cdnjs.cloudflare.com; "
+        "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://fonts.googleapis.com; "
+        "font-src 'self' https://cdnjs.cloudflare.com https://fonts.gstatic.com; "
         "img-src 'self' data:; "
     )
     response.headers['X-Content-Type-Options'] = 'nosniff'
@@ -49,21 +47,66 @@ def set_security_headers(response):
     return response
 
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-MODEL_PATH = os.path.join(BASE_DIR, 'Models', 'model.h5')
+EMOTION_COLORS = {
+    'angry': (0, 0, 255),
+    'disgust': (0, 128, 0),
+    'fear': (128, 0, 128),
+    'happy': (0, 255, 0),
+    'sad': (255, 0, 0),
+    'surprise': (0, 255, 255),
+    'neutral': (200, 200, 200),
+}
 
-try:
-    model = load_model(MODEL_PATH)
-    logger.info("Model loaded successfully from %s", MODEL_PATH)
-except Exception as e:
-    logger.error("Failed to load model from %s: %s", MODEL_PATH, e)
-    model = None
+COMPOUND_EMOTIONS = [
+    {'name': 'Happily Surprised', 'requires': ('happy', 'surprise'), 'emoji': '🤩'},
+    {'name': 'Sadly Angry', 'requires': ('sad', 'angry'), 'emoji': '😠'},
+    {'name': 'Fearfully Surprised', 'requires': ('fear', 'surprise'), 'emoji': '😱'},
+    {'name': 'Sadly Surprised', 'requires': ('sad', 'surprise'), 'emoji': '😧'},
+    {'name': 'Angrily Disgusted', 'requires': ('angry', 'disgust'), 'emoji': '🤬'},
+    {'name': 'Fearfully Angry', 'requires': ('fear', 'angry'), 'emoji': '😤'},
+    {'name': 'Sadly Fearful', 'requires': ('sad', 'fear'), 'emoji': '😰'},
+    {'name': 'Happily Disgusted', 'requires': ('happy', 'disgust'), 'emoji': '😏'},
+    {'name': 'Contempt', 'requires': ('neutral', 'disgust'), 'emoji': '😒'},
+    {'name': 'Awe', 'requires': ('fear', 'happy'), 'emoji': '😲'},
+    {'name': 'Anxious', 'requires': ('fear', 'sad'), 'emoji': '😟'},
+    {'name': 'Outraged', 'requires': ('angry', 'surprise'), 'emoji': '🤯'},
+    {'name': 'Bored', 'requires': ('neutral', 'sad'), 'emoji': '😐'},
+    {'name': 'Pleased', 'requires': ('happy', 'neutral'), 'emoji': '😊'},
+    {'name': 'Horrified', 'requires': ('fear', 'disgust'), 'emoji': '😨'},
+]
 
-class_labels = ['Happy', 'Sad', 'Surprise', 'Neutral']
+INTENSITY_LABELS = {
+    'angry': {(0, 20): 'Slightly Irritated', (20, 50): 'Annoyed', (50, 75): 'Angry', (75, 100): 'Furious'},
+    'disgust': {(0, 20): 'Mildly Disgusted', (20, 50): 'Disgusted', (50, 75): 'Revolted', (75, 100): 'Appalled'},
+    'fear': {(0, 20): 'Uneasy', (20, 50): 'Worried', (50, 75): 'Afraid', (75, 100): 'Terrified'},
+    'happy': {(0, 20): 'Content', (20, 50): 'Pleased', (50, 75): 'Happy', (75, 100): 'Elated'},
+    'sad': {(0, 20): 'Melancholic', (20, 50): 'Unhappy', (50, 75): 'Sad', (75, 100): 'Devastated'},
+    'surprise': {(0, 20): 'Intrigued', (20, 50): 'Surprised', (50, 75): 'Amazed', (75, 100): 'Astonished'},
+    'neutral': {(0, 20): 'Neutral', (20, 50): 'Calm', (50, 75): 'Composed', (75, 100): 'Stoic'},
+}
 
-face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-if face_cascade.empty():
-    logger.error("Failed to load Haar cascade for face detection")
+
+def get_intensity_label(emotion, score):
+    ranges = INTENSITY_LABELS.get(emotion, {})
+    for (low, high), label in ranges.items():
+        if low <= score < high:
+            return label
+    return emotion.capitalize()
+
+
+def detect_compound_emotion(emotions):
+    sorted_emotions = sorted(emotions.items(), key=lambda x: x[1], reverse=True)
+    top1_name, top1_score = sorted_emotions[0]
+    top2_name, top2_score = sorted_emotions[1]
+
+    if top2_score >= 15:
+        for compound in COMPOUND_EMOTIONS:
+            pair = compound['requires']
+            if (top1_name, top2_name) == pair or (top2_name, top1_name) == pair:
+                return compound['name'], compound['emoji']
+
+    return get_intensity_label(top1_name, top1_score), ''
+
 
 camera = None
 
@@ -87,33 +130,39 @@ def allowed_file(filename):
 
 
 def detect_faces_and_emotions(image):
-    if model is None:
-        return image, "Model not loaded"
+    try:
+        results = DeepFace.analyze(image, actions=['emotion'], enforce_detection=False, silent=True)
+    except Exception as e:
+        logger.error("DeepFace analysis failed: %s", e)
+        return image, "Analysis failed", {}, '', ''
 
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
+    if not results:
+        return image, "No face detected", {}, '', ''
 
-    if len(faces) == 0:
-        return image, "No face detected"
+    all_emotions = {}
+    dominant_emotion = None
+    compound_label = ''
+    compound_emoji = ''
 
-    detected_emotion = None
-    for (x, y, w, h) in faces:
-        cv2.rectangle(image, (x, y), (x + w, y + h), (255, 0, 0), 2)
+    for face in results:
+        region = face.get('region', {})
+        x, y, w, h = region.get('x', 0), region.get('y', 0), region.get('w', 0), region.get('h', 0)
 
-        face = image[y:y + h, x:x + w]
-        face_resized = cv2.resize(face, (96, 96))
-        face_resized = cv2.cvtColor(face_resized, cv2.COLOR_BGR2RGB)
-        face_resized = img_to_array(face_resized)
-        face_resized = np.expand_dims(face_resized, axis=0) / 255.0
+        dominant_emotion = face.get('dominant_emotion', 'unknown')
+        emotions = face.get('emotion', {})
+        all_emotions = emotions
 
-        prediction = model.predict(face_resized, verbose=0)
-        max_index = np.argmax(prediction[0])
-        detected_emotion = class_labels[max_index]
+        compound_label, compound_emoji = detect_compound_emotion(emotions)
 
+        color = EMOTION_COLORS.get(dominant_emotion, (0, 255, 0))
+
+        cv2.rectangle(image, (x, y), (x + w, y + h), color, 2)
+
+        label = f"{compound_label} ({emotions.get(dominant_emotion, 0):.1f}%)"
         label_position = (x, y - 10)
-        cv2.putText(image, detected_emotion, label_position, cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+        cv2.putText(image, label, label_position, cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
 
-    return image, detected_emotion
+    return image, dominant_emotion, all_emotions, compound_label, compound_emoji
 
 
 @app.route('/')
@@ -143,12 +192,13 @@ def upload():
             if image is None:
                 return render_template('upload.html', emotion=None, error='Could not read image. Please try another file.')
 
-            processed_image, emotion = detect_faces_and_emotions(image)
+            processed_image, emotion, emotions, compound, emoji = detect_faces_and_emotions(image)
 
             _, buffer = cv2.imencode('.jpg', processed_image)
             image_base64 = base64.b64encode(buffer).decode('utf-8')
 
-            return render_template('upload.html', emotion=emotion, image=image_base64)
+            return render_template('upload.html', emotion=emotion, emotions=emotions,
+                                   compound=compound, emoji=emoji, image=image_base64)
 
         except Exception as e:
             logger.exception("Error processing uploaded image")
@@ -184,7 +234,7 @@ def video_feed():
             if not success:
                 break
 
-            frame, _ = detect_faces_and_emotions(frame)
+            frame, _, _, _, _ = detect_faces_and_emotions(frame)
 
             _, buffer = cv2.imencode('.jpg', frame)
             frame = buffer.tobytes()
@@ -208,8 +258,7 @@ def stop_detection():
 def health_check():
     return jsonify({
         'status': 'ok',
-        'model_loaded': model is not None,
-        'cascade_loaded': not face_cascade.empty()
+        'emotions_supported': list(EMOTION_COLORS.keys())
     })
 
 

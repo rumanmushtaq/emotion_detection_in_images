@@ -9,17 +9,82 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
-<body class="bg-light">
-    <div class="container text-center py-5">
-        <h1 class="display-4 fw-bold text-primary">Emotion Detection App</h1>
-        <p class="lead text-secondary">Upload an image or use real-time detection to analyze emotions.</p>
-        <div class="d-flex justify-content-center gap-3 mt-4">
-            <a href="{{ url_for('upload') }}" class="btn btn-primary btn-lg">
-                <i class="fas fa-upload"></i> Upload Image
+<body>
+    <div class="bg-animated">
+        <div class="circle"></div>
+        <div class="circle"></div>
+        <div class="circle"></div>
+    </div>
+
+    <nav class="navbar-custom">
+        <div class="container d-flex justify-content-between align-items-center">
+            <span class="brand-text"><i class="fas fa-brain"></i> EmotionAI</span>
+            <a href="{{ url_for('health_check') }}" class="btn-outline-glass" style="font-size: 0.85rem;">
+                <i class="fas fa-heartbeat"></i> Status
             </a>
-            <a href="{{ url_for('real_time') }}" class="btn btn-success btn-lg">
-                <i class="fas fa-video"></i> Real-Time Detection
-            </a>
+        </div>
+    </nav>
+
+    <div class="container" style="padding-top: 8vh;">
+        <div class="text-center">
+            <h1 class="hero-title">Read Every<br>Emotion</h1>
+            <p class="hero-subtitle">
+                AI-powered facial emotion detection with 43 expressions — upload a photo or go live with your webcam.
+            </p>
+
+            <div class="d-flex justify-content-center gap-3 flex-wrap">
+                <a href="{{ url_for('upload') }}" class="btn-glow btn-glow-primary">
+                    <i class="fas fa-cloud-upload-alt"></i> Upload Image
+                </a>
+                <a href="{{ url_for('real_time') }}" class="btn-glow btn-glow-green">
+                    <i class="fas fa-video"></i> Live Detection
+                </a>
+            </div>
+
+            <div class="stats-row">
+                <div class="stat-item glass" style="border-radius: 12px;">
+                    <div class="stat-value">43</div>
+                    <div class="stat-label">Expressions</div>
+                </div>
+                <div class="stat-item glass" style="border-radius: 12px;">
+                    <div class="stat-value">7</div>
+                    <div class="stat-label">Base Emotions</div>
+                </div>
+                <div class="stat-item glass" style="border-radius: 12px;">
+                    <div class="stat-value">15</div>
+                    <div class="stat-label">Compound</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row g-4 mt-5 justify-content-center">
+            <div class="col-md-4">
+                <div class="glass-card feature-card">
+                    <div class="feature-icon feature-icon-purple">
+                        <i class="fas fa-image"></i>
+                    </div>
+                    <h5 class="feature-title">Image Analysis</h5>
+                    <p class="feature-desc">Upload any photo and get instant emotion breakdown with confidence scores.</p>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="glass-card feature-card">
+                    <div class="feature-icon feature-icon-blue">
+                        <i class="fas fa-camera"></i>
+                    </div>
+                    <h5 class="feature-title">Real-Time Detection</h5>
+                    <p class="feature-desc">Use your webcam for live emotion tracking with instant feedback.</p>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="glass-card feature-card">
+                    <div class="feature-icon feature-icon-green">
+                        <i class="fas fa-brain"></i>
+                    </div>
+                    <h5 class="feature-title">DeepFace AI</h5>
+                    <p class="feature-desc">Powered by DeepFace with compound emotions and intensity levels.</p>
+                </div>
+            </div>
         </div>
     </div>
 
